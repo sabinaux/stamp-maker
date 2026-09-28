@@ -35,6 +35,7 @@ button,select{font:inherit;font-size:.92rem;padding:7px 12px;border-radius:12px;
 button.on{background:var(--accent);color:#fff}
 button:focus-visible,input:focus-visible,select:focus-visible{outline:3px solid var(--accent);outline-offset:2px}
 input[type=file]{font:inherit;font-size:.85rem;max-width:100%}
+p.hint{font-size:.82rem;color:var(--muted);margin:8px 0 0}
 footer{margin-top:36px;display:flex;flex-direction:column;align-items:center;gap:8px;color:var(--muted);font-size:.95rem}
 footer img{width:96px;height:96px;display:block}
 </style>
@@ -78,6 +79,9 @@ footer img{width:96px;height:96px;display:block}
       <h2>Image</h2>
       <input type="file" id="file" accept="image/*" aria-label="Add an image">
       <div class="row"><button id="rmimg">Remove image</button></div>
+      <h2>Save</h2>
+      <div class="row"><button id="save" class="on">Save stamp as PNG</button></div>
+      <p class="hint">Saves a transparent PNG with your perforations cut out.</p>
     </div>
   </div>
   <footer>
@@ -100,6 +104,7 @@ function render(){
   for(let j=0;j<ny;j++){const y=(j+off)*py;holes+=`<circle cx="0" cy="${y}" r="${r}"/><circle cx="${W}" cy="${y}" r="${r}"/>`}
   if(scoop&&cr>0)holes+=[[0,0],[W,0],[0,H],[W,H]].map(p=>`<circle cx="${p[0]}" cy="${p[1]}" r="${cr}"/>`).join('');
   const rx=(scoop||classic)?0:cr,aw=W-2*m,ah=H-2*m,ar=Math.max(0,rx-m*.6);
+  window._g={m,aw,ah,ar};
   const fs=$('fs').value,fw=+$('fw').value,fc=$('fc').value;let frame='';
   if(fs==='single')frame=`<rect x="${m+fw/2}" y="${m+fw/2}" width="${aw-fw}" height="${ah-fw}" rx="${Math.max(0,ar-fw/2)}" fill="none" stroke="${fc}" stroke-width="${fw}"/>`;
   if(fs==='double'){const th=Math.max(1.5,fw/3),o=fw+fw*.6+th/2;frame=`<rect x="${m+fw/2}" y="${m+fw/2}" width="${aw-fw}" height="${ah-fw}" rx="${Math.max(0,ar-fw/2)}" fill="none" stroke="${fc}" stroke-width="${fw}"/><rect x="${m+o}" y="${m+o}" width="${aw-2*o}" height="${ah-2*o}" rx="${Math.max(0,ar-o)}" fill="none" stroke="${fc}" stroke-width="${th}"/>`}
@@ -129,6 +134,31 @@ function seg(a,b){
 cv.addEventListener('pointerdown',e=>{drawing=true;cv.setPointerCapture(e.pointerId);last=pt(e);seg(last,{x:last.x+.01,y:last.y})});
 cv.addEventListener('pointermove',e=>{if(!drawing)return;const p=pt(e);seg(last,p);last=p});
 ['pointerup','pointercancel'].forEach(t=>cv.addEventListener(t,()=>{drawing=false}));
+async function stampBlob(sc){
+  const g=window._g,c=document.createElement('canvas');c.width=W*sc;c.height=H*sc;const x=c.getContext('2d');
+  const clone=svg.cloneNode(true);clone.setAttribute('width',W);clone.setAttribute('height',H);clone.setAttribute('xmlns','http://www.w3.org/2000/svg');
+  const img=new Image();
+  await new Promise((res,rej)=>{img.onload=res;img.onerror=rej;img.src='data:image/svg+xml;charset=utf-8,'+encodeURIComponent(new XMLSerializer().serializeToString(clone))});
+  x.drawImage(img,0,0,c.width,c.height);
+  x.save();x.beginPath();
+  if(x.roundRect)x.roundRect(g.m*sc,g.m*sc,g.aw*sc,g.ah*sc,g.ar*sc);else x.rect(g.m*sc,g.m*sc,g.aw*sc,g.ah*sc);
+  x.clip();x.drawImage(cv,0,0,c.width,c.height);x.restore();
+  return new Promise(res=>c.toBlob(res,'image/png'));
+}
+$('save').addEventListener('click',async()=>{
+  const btn=$('save');btn.disabled=true;
+  try{
+    const blob=await stampBlob(3);let done=false;
+    try{if(window.claude&&window.claude.use){const d=await window.claude.use('downloads');if(d){await d.save({filename:'my-stamp.png',data:blob});done=true}}}
+    catch(e){if(e&&e.code==='declined'){btn.disabled=false;return}}
+    if(!done){
+      const file=new File([blob],'my-stamp.png',{type:'image/png'});
+      if(matchMedia('(pointer:coarse)').matches&&navigator.canShare&&navigator.canShare({files:[file]})){await navigator.share({files:[file]})}
+      else{const a=document.createElement('a');a.href=URL.createObjectURL(blob);a.download='my-stamp.png';document.body.appendChild(a);a.click();a.remove();setTimeout(()=>URL.revokeObjectURL(a.href),4000)}
+    }
+  }catch(e){}
+  btn.disabled=false;
+});
 render();
 </script>
 </body>
